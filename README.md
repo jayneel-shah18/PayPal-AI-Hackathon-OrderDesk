@@ -18,13 +18,13 @@ OrderDesk does the retyping and the chasing:
 4. **Approve.** Only now does an agent, using PayPal's own Agent Toolkit, create and send the invoice.
 5. **Paid.** A PayPal webhook marks the order paid. No chasing.
 
-| New order | Orders (AG Grid) |
+| Inbox | Orders (AG Grid) |
 | --- | --- |
-| ![New order](docs/screenshots/new-order.png) | ![Orders grid](docs/screenshots/orders.png) |
+| ![Inbox](docs/screenshots/inbox.png) | ![Orders grid](docs/screenshots/orders.png) |
 
 ## What it handles
 
-The seven sample orders on the home page each test one behavior:
+The inbox opens with seven sample messages, shown as if they arrived this morning from Rosa's Taqueria, Main St Cafe and Harborview Diner. Each one shows a different behavior:
 
 | Sample | What it shows |
 | --- | --- |
@@ -73,7 +73,7 @@ Through [`@paypal/agent-toolkit`](https://github.com/paypal/agent-toolkit) (sand
 | Reminder for unpaid | `send_invoice_reminder` | Send reminder button |
 | QR code for counter payment | `generate_invoice_qr_code` | QR button |
 
-Called directly: `POST /v1/notifications/verify-webhook-signature` to verify every webhook before it is trusted. Events handled: `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.CANCELLED`. Every tool call is recorded and shown in the review screen's activity panel.
+Called directly: `POST /v1/notifications/verify-webhook-signature` to verify every webhook before it is trusted. Events handled: `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.CANCELLED`. Every tool call is recorded and shown on the review screen under "What OrderDesk did".
 
 ### Stack
 
@@ -140,9 +140,9 @@ Free Render services sleep when idle; the first request after a pause takes abou
 
 ## How to test (for judges)
 
-1. Open the live URL and click a sample order, for example **Spanish/English mix**, then **Read order**.
-2. Watch the activity panel: each `search_catalog` call appears as the agent works. The review screen fills with priced lines.
-3. Try **Ambiguous** to see flags. Pick a cup size, enter a quantity, then **Approve and send invoice**.
+1. Open the live URL. The inbox lists this morning's messages. Click a new one, for example the Spanish/English text from **Rosa's Taqueria**.
+2. Watch the "What OrderDesk did" panel: each `search_catalog` call appears as the agent works. The review screen fills with priced lines.
+3. Back in the inbox, open the **Harborview Diner** message "5 cases of cups and some napkins, same as last time" to see flags. Pick a cup size, enter quantities, then **Approve and send invoice**. To enter your own order, use **New order**.
 4. The panel shows `create_invoice`, `send_invoice` and `get_invoice`. Click **Open payer link**.
 5. Log in with the sandbox buyer account given in the Devpost submission and pay.
 6. Return to **Orders**: the row turns **Paid** when the webhook arrives (or click **Refresh**).

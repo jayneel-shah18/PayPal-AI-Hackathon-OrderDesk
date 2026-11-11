@@ -21,12 +21,12 @@ function summary(e: Event): string | null {
 /** Every agent step and tool call for this order, in the order it happened. */
 export function ActivityPanel({ events, live }: { events: Event[]; live: boolean }) {
   return (
-    <aside className="lg:sticky lg:top-4 lg:self-start">
-      <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted">
-        Agent activity
+    <aside className="card p-4">
+      <h2 className="eyebrow flex items-center gap-2">
+        What OrderDesk did
         {live && <span className="live-dot h-1.5 w-1.5 rounded-full bg-sky-ink" />}
       </h2>
-      <ol className="mt-2 rounded-xl border border-rule bg-card p-3">
+      <ol className="mt-3">
         {events.length === 0 && <li className="text-sm text-muted">Nothing yet.</li>}
         {events.map((e, i) => {
           const s = summary(e);

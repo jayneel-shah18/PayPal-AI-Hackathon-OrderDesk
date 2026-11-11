@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Meta } from '@/lib/client';
 import type { OrderDetail } from '@/lib/orders';
 import { formatUsd, MODEL_FLAGS, type ParsedLine } from '@/lib/schema';
+import { CHANNEL_LABEL, channelOf } from '@/lib/inbox';
 import { ActivityPanel } from './ActivityPanel';
+import { ChannelIcon } from './Icons';
 import { StatusChip } from './StatusChip';
 
 type Order = Omit<OrderDetail, 'createdAt' | 'updatedAt' | 'events'> & {
@@ -14,9 +16,9 @@ type Order = Omit<OrderDetail, 'createdAt' | 'updatedAt' | 'events'> & {
 };
 
 const FLAG_LABEL: Record<string, string> = {
-  ambiguous: 'Unclear',
-  not_in_catalog: 'Not in catalog',
-  needs_history: 'Needs order history',
+  ambiguous: 'Question for the customer',
+  not_in_catalog: 'Not something we carry',
+  needs_history: 'Check their last order',
   out_of_stock: 'Short on stock',
 };
 
@@ -100,175 +102,196 @@ export function OrderReview({ id }: { id: string }) {
       i,
     );
   const stockOf = (sku: string | null) => meta?.catalog.find((c) => c.sku === sku)?.stock;
+  const channel = channelOf(order.source, order.rawText);
+  const customer = order.recipientName ?? order.customerHint;
+  const received = new Date(order.createdAt);
+  const flaggedCount = lines.filter((l) => l.flags.length > 0).length;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
-      <section className="min-w-0">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-display text-3xl font-semibold">Review order</h1>
-          <StatusChip status={order.status} />
-          <span className="num text-xs text-muted">{order.id}</span>
-        </div>
+    <div>
+      <Link href="/" className="text-sm text-muted hover:text-ink">
+        ← Inbox
+      </Link>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h1 className="font-display text-3xl font-semibold">{customer ? `Order from ${customer}` : 'New order'}</h1>
+        <StatusChip status={order.status} />
+      </div>
 
-        <figure className="mt-4 rounded-xl border border-rule bg-card p-4">
-          <figcaption className="text-xs font-semibold uppercase tracking-wider text-muted">
-            {order.source === 'photo' ? 'From a photo' : 'Original message'}
-          </figcaption>
-          <blockquote className="mt-1 whitespace-pre-wrap text-[15px] leading-relaxed">{order.rawText}</blockquote>
+      <div className="mt-5 grid gap-5 lg:grid-cols-[21rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start">
+        {/* Left: what the customer sent */}
+        <section className="card p-4 lg:col-start-1 lg:row-start-1" aria-label="Original message">
+          <div className="flex items-center gap-2 text-xs text-muted">
+            <ChannelIcon channel={channel} />
+            <span className="font-medium">{CHANNEL_LABEL[channel]}</span>
+            <time className="ml-auto tabular-nums" dateTime={order.createdAt}>
+              {received.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            </time>
+          </div>
+          <blockquote className="mt-3 whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-paper px-4 py-3 text-[15px] leading-relaxed">
+            {order.source === 'photo' ? 'Photo of a handwritten order' : order.rawText}
+          </blockquote>
           {order.deliveryNote && (
-            <p className="mt-2 text-sm">
-              <span className="font-medium">Delivery:</span> {order.deliveryNote}
+            <p className="mt-3 text-sm">
+              <span className="eyebrow mr-2">Delivery</span>
+              {order.deliveryNote}
             </p>
           )}
-        </figure>
+        </section>
 
-        {order.status === 'parsing' ? (
-          <p className="mt-6 flex items-center gap-2 text-sm text-muted">
-            <span className="live-dot h-2 w-2 rounded-full bg-sky-ink" /> The agent is reading the order and looking up the catalog…
-          </p>
-        ) : (
-          <>
-            <div className="mt-4 overflow-x-auto rounded-xl border border-rule bg-card">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead className="border-b border-rule text-left text-xs uppercase tracking-wider text-muted">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Product</th>
-                    <th className="w-24 px-3 py-2 font-semibold">Qty</th>
-                    <th className="w-24 px-3 py-2 text-right font-semibold">Unit price</th>
-                    <th className="w-28 px-3 py-2 text-right font-semibold">Line total</th>
-                    <th className="w-10 px-2 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-6 text-center text-muted">
-                        No lines. Add one below.
-                      </td>
-                    </tr>
+        {/* Right: the order as it will be invoiced */}
+        <section className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          {order.status === 'parsing' ? (
+            <div className="card flex items-center gap-3 p-6 text-sm text-muted">
+              <span className="live-dot h-2 w-2 rounded-full bg-sky-ink" /> Reading the order and looking up your catalog…
+            </div>
+          ) : (
+            <>
+              <div className="card overflow-hidden">
+                <div className="flex items-baseline gap-3 border-b border-rule px-4 py-3">
+                  <h2 className="text-base font-semibold">Order lines</h2>
+                  {flaggedCount > 0 && (
+                    <span className="text-sm text-amber-ink">
+                      {flaggedCount} need{flaggedCount === 1 ? 's' : ''} your attention
+                    </span>
                   )}
+                </div>
+                <div className="hidden gap-3 border-b border-rule px-4 py-2 sm:flex">
+                  <span className="eyebrow flex-1">Product</span>
+                  <span className="eyebrow w-20">Qty</span>
+                  <span className="eyebrow w-20 text-right">Each</span>
+                  <span className="eyebrow w-24 text-right">Total</span>
+                  <span className="w-6" />
+                </div>
+                <ul className="divide-y divide-rule">
+                  {lines.length === 0 && <li className="px-4 py-8 text-center text-sm text-muted">No lines yet. Add one below.</li>}
                   {lines.map((l, i) => {
                     const flagged = l.flags.length > 0;
                     const stock = stockOf(l.sku);
                     return (
-                      <tr key={i} className={`border-b border-rule last:border-0 align-top ${flagged ? 'bg-amber-soft' : ''}`}>
-                        <td className="px-3 py-2">
-                          <select
-                            className="field"
-                            disabled={!editable || saving}
-                            value={l.sku ?? ''}
-                            onChange={(e) => setLine(i, { sku: e.target.value || null })}
-                            aria-label={`Product for line ${i + 1}`}
-                          >
-                            <option value="">Choose a product…</option>
-                            {(meta?.catalog ?? (l.sku ? [{ sku: l.sku, name: l.name ?? l.sku }] : [])).map((c) => (
-                              <option key={c.sku} value={c.sku}>
-                                {c.name} · {c.sku}
-                              </option>
-                            ))}
-                          </select>
-                          <p className="mt-1 text-xs text-muted">
-                            “{l.raw_text}”{!flagged && l.confidence < 1 && <span> · {Math.round(l.confidence * 100)}% sure</span>}
-                          </p>
-                          {flagged && (
-                            <div className="mt-2 border-l-2 border-amber-rule pl-2 text-amber-ink">
-                              <p className="text-xs font-semibold">{l.flags.map((f) => FLAG_LABEL[f] ?? f).join(' · ')}</p>
-                              {l.flag_reason && <p className="text-xs">{l.flag_reason}</p>}
-                              {editable && (
-                                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                  {!l.sku &&
-                                    l.candidates.map((c) => (
-                                      <button key={c.sku} className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, { sku: c.sku })}>
-                                        {c.name}
-                                      </button>
-                                    ))}
-                                  {l.flags.includes('out_of_stock') && stock != null && stock > 0 && (
-                                    <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, { qty: stock })}>
-                                      Send {stock} now
-                                    </button>
-                                  )}
-                                  {l.sku && l.qty && !l.flags.includes('out_of_stock') && (
-                                    <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, {})}>
-                                      Looks right
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <QtyInput value={l.qty} disabled={!editable || saving} onCommit={(qty) => setLine(i, { qty })} label={`Quantity for line ${i + 1}`} />
-                          {l.unit && <p className="mt-1 text-xs text-muted">{/(x|s|ch)$/.test(l.unit) ? `${l.unit}es` : `${l.unit}s`}</p>}
-                        </td>
-                        <td className="num px-3 py-2.5 text-right">{formatUsd(l.unit_price_cents)}</td>
-                        <td className="num px-3 py-2.5 text-right font-medium">{formatUsd(l.line_total_cents)}</td>
-                        <td className="px-2 py-2 text-right">
-                          {editable && (
-                            <button
-                              className="rounded p-1 text-muted hover:bg-brick-soft hover:text-brick"
-                              disabled={saving}
-                              onClick={() => saveLines(lines.filter((_, j) => j !== i))}
-                              aria-label={`Remove line ${i + 1}`}
-                              title="Remove line"
+                      <li key={i} className={`px-4 py-3 ${flagged ? 'bg-amber-soft' : ''}`}>
+                        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                          <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">
+                            <select
+                              className="field"
+                              disabled={!editable || saving}
+                              value={l.sku ?? ''}
+                              onChange={(e) => setLine(i, { sku: e.target.value || null })}
+                              aria-label={`Product for line ${i + 1}`}
                             >
-                              ✕
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                              <option value="">Choose a product…</option>
+                              {(meta?.catalog ?? (l.sku ? [{ sku: l.sku, name: l.name ?? l.sku }] : [])).map((c) => (
+                                <option key={c.sku} value={c.sku}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="mt-1 text-xs text-muted">
+                              Customer wrote “{l.raw_text}”{l.sku && <span className="num"> · {l.sku}</span>}
+                            </p>
+                          </div>
+                          <div className="w-20">
+                            <QtyInput value={l.qty} disabled={!editable || saving} onCommit={(qty) => setLine(i, { qty })} label={`Quantity for line ${i + 1}`} />
+                            {l.unit && <p className="mt-1 text-xs text-muted">{/(x|s|ch)$/.test(l.unit) ? `${l.unit}es` : `${l.unit}s`}</p>}
+                          </div>
+                          <div className="num w-20 pt-1.5 text-right text-sm text-muted">
+                            {formatUsd(l.unit_price_cents)}
+                            <span className="block text-[11px] sm:hidden">each</span>
+                          </div>
+                          <div className="num ml-auto w-24 pt-1.5 text-right text-sm font-semibold sm:ml-0">{formatUsd(l.line_total_cents)}</div>
+                          <div className="w-6 pt-1 text-right">
+                            {editable && (
+                              <button
+                                className="rounded p-1 text-muted hover:bg-brick-soft hover:text-brick"
+                                disabled={saving}
+                                onClick={() => saveLines(lines.filter((_, j) => j !== i))}
+                                aria-label={`Remove line ${i + 1}`}
+                                title="Remove line"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {flagged && (
+                          <div className="mt-2 rounded-lg border border-amber-rule bg-white/60 px-3 py-2 text-amber-ink">
+                            <p className="text-xs font-semibold">{l.flags.map((f) => FLAG_LABEL[f] ?? f).join(' · ')}</p>
+                            {l.flag_reason && <p className="mt-0.5 text-sm">{l.flag_reason}</p>}
+                            {editable && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {!l.sku &&
+                                  l.candidates.map((c) => (
+                                    <button key={c.sku} className="btn !whitespace-normal !py-1 !text-left !text-xs" disabled={saving} onClick={() => setLine(i, { sku: c.sku })}>
+                                      {c.name}
+                                    </button>
+                                  ))}
+                                {l.flags.includes('out_of_stock') && stock != null && stock > 0 && (
+                                  <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, { qty: stock })}>
+                                    Send {stock} now
+                                  </button>
+                                )}
+                                {l.sku && l.qty && !l.flags.includes('out_of_stock') && (
+                                  <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, {})}>
+                                    Looks right
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </li>
                     );
                   })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-rule">
-                    <td className="px-3 py-3" colSpan={2}>
-                      {editable && (
-                        <button
-                          className="btn !py-1 !text-xs"
-                          disabled={saving}
-                          onClick={() =>
-                            saveLines([
-                              ...lines,
-                              { raw_text: 'Added by owner', sku: null, name: null, unit: null, qty: 1, unit_price_cents: null, line_total_cents: null, confidence: 1, flags: [], flag_reason: null, candidates: [] },
-                            ])
-                          }
-                        >
-                          + Add line
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted">Total</td>
-                    <td className="num px-3 py-3 text-right text-base font-semibold">{formatUsd(order.totalCents)}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                </ul>
+                <div className="flex items-center gap-3 border-t border-rule bg-paper/50 px-4 py-3">
+                  {editable && (
+                    <button
+                      className="btn !py-1 !text-xs"
+                      disabled={saving}
+                      onClick={() =>
+                        saveLines([
+                          ...lines,
+                          { raw_text: 'Added by owner', sku: null, name: null, unit: null, qty: 1, unit_price_cents: null, line_total_cents: null, confidence: 1, flags: [], flag_reason: null, candidates: [] },
+                        ])
+                      }
+                    >
+                      + Add line
+                    </button>
+                  )}
+                  <span className="eyebrow ml-auto">Invoice total</span>
+                  <span className="num text-xl font-semibold">{formatUsd(order.totalCents)}</span>
+                  <span className="hidden w-6 sm:block" />
+                </div>
+              </div>
 
-            <div className="mt-4 grid gap-3 rounded-xl border border-rule bg-card p-4 sm:grid-cols-2">
-              <label className="text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Bill to</span>
-                <select className="field" disabled={!editable || saving} value={order.customerId ?? ''} onChange={(e) => patch({ customerId: e.target.value || null })}>
-                  <option value="">{order.customerHint ? `"${order.customerHint}" (pick a customer)` : 'Pick a customer…'}</option>
-                  {(meta?.customers ?? []).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Billing email</span>
-                <EmailInput value={order.recipientEmail ?? ''} disabled={!editable || saving} onCommit={(recipientEmail) => patch({ recipientEmail })} />
-              </label>
-            </div>
+              <div className="card mt-4 grid gap-3 p-4 sm:grid-cols-2">
+                <label className="text-sm">
+                  <span className="eyebrow mb-1 block">Bill to</span>
+                  <select className="field" disabled={!editable || saving} value={order.customerId ?? ''} onChange={(e) => patch({ customerId: e.target.value || null })}>
+                    <option value="">{order.customerHint ? `"${order.customerHint}" (pick a customer)` : 'Pick a customer…'}</option>
+                    {(meta?.customers ?? []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="eyebrow mb-1 block">Invoice goes to</span>
+                  <EmailInput value={order.recipientEmail ?? ''} disabled={!editable || saving} onCommit={(recipientEmail) => patch({ recipientEmail })} />
+                </label>
+              </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3">
               {editable && (
-                <>
+                <div className="card mt-4 flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+                  <p className="min-w-0 flex-1 text-sm text-muted">
+                    {order.blocker ?? (
+                      <>
+                        Sends a PayPal invoice for <span className="num font-semibold text-ink">{formatUsd(order.totalCents)}</span> to {order.recipientEmail}.
+                      </>
+                    )}
+                  </p>
                   <button
-                    className="btn btn-primary !px-5 !py-2.5 !text-base"
+                    className="btn btn-primary w-full !px-6 !py-3 !text-base sm:w-auto"
                     disabled={saving || !!order.blocker}
                     onClick={async () => {
                       const res = await run(() => api(`/api/orders/${id}/approve`, { method: 'POST' }));
@@ -277,91 +300,93 @@ export function OrderReview({ id }: { id: string }) {
                   >
                     Approve and send invoice
                   </button>
-                  <span className="text-sm text-muted">{order.blocker ?? 'Creates and sends a PayPal invoice for the total above.'}</span>
-                </>
+                </div>
               )}
+
               {order.status === 'sending' && (
-                <p className="flex items-center gap-2 text-sm text-muted">
-                  <span className="live-dot h-2 w-2 rounded-full bg-sky-ink" /> The agent is creating and sending the PayPal invoice…
+                <div className="card mt-4 flex items-center gap-3 p-4 text-sm text-muted">
+                  <span className="live-dot h-2 w-2 rounded-full bg-sky-ink" /> Creating and sending the PayPal invoice…
+                </div>
+              )}
+
+              {order.status === 'paid' && (
+                <p className="mt-4 rounded-xl bg-leaf-soft px-4 py-3 text-sm font-medium text-leaf">Paid through PayPal. Nothing left to chase.</p>
+              )}
+              {order.status === 'failed' && order.error && (
+                <p className="mt-4 rounded-xl bg-brick-soft px-4 py-3 text-sm text-brick">
+                  {order.error} {order.invoiceId ? 'An invoice exists in PayPal for this order; use Refresh status.' : 'Fix the order or try again.'}
                 </p>
               )}
-              {order.invoiceId && !working && (
-                <>
-                  {order.invoiceUrl && (
-                    <a className="btn btn-primary" href={order.invoiceUrl} target="_blank" rel="noreferrer">
-                      Open payer link ↗
-                    </a>
-                  )}
-                  <button
-                    className="btn"
-                    disabled={saving}
-                    onClick={async () => {
-                      const res = await run(() => api<{ order: Order }>(`/api/orders/${id}/refresh`, { method: 'POST' }));
-                      if (res) setOrder(res.order);
-                    }}
-                  >
-                    Refresh status
-                  </button>
-                  {order.status === 'invoiced' && (
-                    <>
-                      <button
-                        className="btn"
-                        disabled={saving}
-                        onClick={async () => {
-                          const res = await run(() => api(`/api/orders/${id}/remind`, { method: 'POST' }));
-                          if (res) {
-                            setNotice('Reminder sent.');
-                            load();
-                          }
-                        }}
-                      >
-                        Send reminder
-                      </button>
-                      <button
-                        className="btn"
-                        disabled={saving}
-                        onClick={async () => {
-                          const res = await run(() => api<{ image: string }>(`/api/orders/${id}/qr`, { method: 'POST' }));
-                          if (res) setQr(res.image);
-                        }}
-                      >
-                        QR code for counter
-                      </button>
-                    </>
-                  )}
-                  <span className="text-sm text-muted">
-                    Invoice <span className="num">{order.invoiceNumber ?? order.invoiceId}</span>
-                  </span>
-                </>
-              )}
-            </div>
-            {order.status === 'paid' && (
-              <p className="mt-4 rounded-lg bg-leaf-soft px-4 py-3 text-sm font-medium text-leaf">Paid through PayPal. Nothing left to chase.</p>
-            )}
-            {order.status === 'failed' && order.error && (
-              <p className="mt-4 rounded-lg bg-brick-soft px-4 py-3 text-sm text-brick">
-                {order.error} {order.invoiceId ? 'An invoice exists in PayPal for this order; use Refresh status.' : 'Fix the order or try again.'}
-              </p>
-            )}
-            {qr && (
-              <figure className="mt-4 inline-block rounded-xl border border-rule bg-white p-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={qr} alt="PayPal invoice QR code" width={220} height={220} />
-                <figcaption className="mt-1 text-center text-xs text-muted">Scan to pay at the counter</figcaption>
-              </figure>
-            )}
-          </>
-        )}
-        {notice && <p className="mt-3 text-sm text-leaf">{notice}</p>}
-        {error && <p className="mt-3 text-sm text-brick">{error}</p>}
-        <p className="mt-6 text-sm">
-          <Link href="/orders" className="text-muted underline hover:text-ink">
-            All orders
-          </Link>
-        </p>
-      </section>
 
-      <ActivityPanel events={order.events} live={working} />
+              {order.invoiceId && !working && (
+                <div className="card mt-4 p-4">
+                  <p className="text-sm">
+                    Invoice <span className="num font-semibold">{order.invoiceNumber ?? order.invoiceId}</span>
+                    {order.recipientEmail && <span className="text-muted"> · sent to {order.recipientEmail}</span>}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {order.invoiceUrl && (
+                      <a className="btn btn-primary" href={order.invoiceUrl} target="_blank" rel="noreferrer">
+                        Open payer link ↗
+                      </a>
+                    )}
+                    <button
+                      className="btn"
+                      disabled={saving}
+                      onClick={async () => {
+                        const res = await run(() => api<{ order: Order }>(`/api/orders/${id}/refresh`, { method: 'POST' }));
+                        if (res) setOrder(res.order);
+                      }}
+                    >
+                      Refresh status
+                    </button>
+                    {order.status === 'invoiced' && (
+                      <>
+                        <button
+                          className="btn"
+                          disabled={saving}
+                          onClick={async () => {
+                            const res = await run(() => api(`/api/orders/${id}/remind`, { method: 'POST' }));
+                            if (res) {
+                              setNotice('Reminder sent.');
+                              load();
+                            }
+                          }}
+                        >
+                          Send reminder
+                        </button>
+                        <button
+                          className="btn"
+                          disabled={saving}
+                          onClick={async () => {
+                            const res = await run(() => api<{ image: string }>(`/api/orders/${id}/qr`, { method: 'POST' }));
+                            if (res) setQr(res.image);
+                          }}
+                        >
+                          QR code for counter
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {qr && (
+                    <figure className="mt-4 inline-block rounded-xl border border-rule bg-white p-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={qr} alt="PayPal invoice QR code" width={220} height={220} />
+                      <figcaption className="mt-1 text-center text-xs text-muted">Scan to pay at the counter</figcaption>
+                    </figure>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+          {notice && <p className="mt-3 text-sm text-leaf">{notice}</p>}
+          {error && <p className="mt-3 rounded-lg bg-brick-soft px-3 py-2 text-sm text-brick">{error}</p>}
+        </section>
+
+        <div className="lg:col-start-1 lg:row-start-2">
+          <ActivityPanel events={order.events} live={working} />
+        </div>
+      </div>
     </div>
   );
 }
