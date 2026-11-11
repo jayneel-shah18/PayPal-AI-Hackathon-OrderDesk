@@ -1,8 +1,10 @@
 # OrderDesk
 
-**For small distributors: paste a messy text or email order. An AI agent turns it into a priced PayPal invoice that the owner approves and sends in one tap, then tracks payment.**
+**For small distributors: customer orders arrive as messy texts, emails and photos. An AI agent turns each one into a priced PayPal invoice that the owner approves and sends in one tap, then tracks payment.**
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). PayPal sandbox only.
+
+**Live demo:** https://orderdesk-g9ph.onrender.com/ (PayPal sandbox only)
 
 ![Review screen with flagged lines](docs/screenshots/review.png)
 
@@ -12,7 +14,7 @@ Small distributors, like a company that supplies restaurants and cafes, take ord
 
 OrderDesk does the retyping and the chasing:
 
-1. **Order in.** Paste the message as it arrived, or attach a photo of a handwritten list.
+1. **Order in.** Orders land in an inbox as texts, emails and photos, the way they arrived. Phone or paper orders can be pasted on the **New order** page, with an optional photo of a handwritten list.
 2. **Agent reads it.** Claude looks up each product in the catalog, converts cases to units, and prices every line. Anything unclear is flagged with the reason, not guessed.
 3. **Owner reviews.** Edit lines, fix flags in one click, pick the customer.
 4. **Approve.** Only now does an agent, using PayPal's own Agent Toolkit, create and send the invoice.
@@ -42,7 +44,7 @@ One Next.js app does everything. The only other services are Claude, the PayPal 
 
 ```mermaid
 flowchart LR
-  owner([Owner]) -->|paste order or photo| parse[POST /api/parse]
+  owner([Owner]) -->|open inbox message or add new order| parse[POST /api/parse]
   parse -->|structured output + search_catalog tool| claude[(Claude)]
   parse -->|price, convert cases, check stock in code| db[(Postgres)]
   owner -->|edit, then Approve| approve[POST /api/orders/:id/approve]
@@ -91,7 +93,7 @@ Called directly: `POST /v1/notifications/verify-webhook-signature` to verify eve
 Requires Node 20 or newer.
 
 ```bash
-git clone https://github.com/jayneel-shah18/PayPal-AI-Hackathon-.git && cd PayPal-AI-Hackathon-
+git clone https://github.com/jayneel-shah18/PayPal-AI-Hackathon-OrderDesk.git && cd PayPal-AI-Hackathon-OrderDesk
 npm run demo
 ```
 
@@ -152,7 +154,7 @@ Free Render services sleep when idle; the first request after a pause takes abou
 ## How AI tools were used
 
 - **In the product:** Claude (`claude-sonnet-5-5`) reads orders with structured output and a catalog search tool, reads handwritten photos with vision, and drives PayPal's Agent Toolkit to create and send invoices.
-- **In development:** Claude Code was used to plan and write the code and tests. All code was written after October 1, 2026.
+- **In development:** I designed the product, the architecture and the guardrails (code-enforced approval, the model never setting prices, the approve route as the only path to PayPal), and chose the stack and test cases. I used Claude Code as a coding assistant to implement and iterate on that design, write tests and speed up UI work, reviewing and directing the changes throughout. All code was written after October 1, 2026.
 
 ## Notes
 
