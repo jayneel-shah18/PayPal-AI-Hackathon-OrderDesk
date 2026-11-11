@@ -1,0 +1,195 @@
+import { randomUUID } from 'node:crypto';
+import { asc, desc, eq } from 'drizzle-orm';
+import { getDb, schema } from './db';
+import { approvalBlocker, type LineInput, resolveLine, totalCents } from './pricing';
+import type { OrderStatus, ParsedLine, ParsedOrder } from './schema';
+
+const { orders, orderLines, events, customers } = schema;
+
+export type OrderRow = typeof orders.$inferSelect;
+export type EventRow = typeof events.$inferSelect;
+export type CustomerRow = typeof customers.$inferSelect;
+export type OrderDetail = OrderRow & { lines: ParsedLine[]; events: EventRow[]; blocker: string | null };
+
+export function newOrderId(): string {
+  return `ord_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+}
+
+function toParsedLine(row: typeof orderLines.$inferSelect): ParsedLine {
+  return {
+    raw_text: row.rawText,
+    sku: row.sku,
+    name: row.name,
+    unit: row.unit,
+    qty: row.qty,
+    unit_price_cents: row.unitPriceCents,
+    line_total_cents: row.lineTotalCents,
+    confidence: row.confidence,
+    flags: row.flags,
+    flag_reason: row.flagReason,
+    candidates: row.candidates,
+  };
+}
+
+export async function createOrder(input: { rawText: string; source: 'text' | 'photo' }): Promise<OrderRow> {
+  const db = await getDb();
+  const [row] = await db
+    .insert(orders)
+    .values({ id: newOrderId(), rawText: input.rawText, source: input.source, status: 'parsing' })
+    .returning();
+  return row;
+}
+
+export async function addEvent(orderId: string, kind: string, label: string, detail?: unknown): Promise<void> {
+  const db = await getDb();
+  await db.insert(events).values({ orderId, kind, label, detail: detail ?? null });
+}
+
+export async function updateOrder(id: string, patch: Partial<typeof orders.$inferInsert>): Promise<void> {
+  const db = await getDb();
+  await db
+    .update(orders)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(orders.id, id));
+}
+
+async function writeLines(orderId: string, lines: ParsedLine[]): Promise<void> {
+  const db = await getDb();
+  await db.delete(orderLines).where(eq(orderLines.orderId, orderId));
+  if (lines.length === 0) return;
+  await db.insert(orderLines).values(
+    lines.map((l, position) => ({
+      orderId,
+      position,
+      rawText: l.raw_text,
+      sku: l.sku,
+      name: l.name,
+      unit: l.unit,
+      qty: l.qty,
+      unitPriceCents: l.unit_price_cents,
+      lineTotalCents: l.line_total_cents,
+      confidence: l.confidence,
+      flags: l.flags,
+      flagReason: l.flag_reason,
+      candidates: l.candidates,
+    })),
+  );
+}
+
+function statusFor(lines: ParsedLine[]): OrderStatus {
+  return lines.length === 0 || lines.some((l) => l.flags.length) ? 'needs_info' : 'draft';
+}
+
+/** Store the parser's result and match the customer named in the order, if any. */
+export async function saveParsedOrder(orderId: string, parsed: ParsedOrder): Promise<void> {
+  await writeLines(orderId, parsed.lines);
+  const all = await listCustomers();
+  const hint = parsed.customer_name?.toLowerCase();
+  const match = hint ? all.find((c) => c.name.toLowerCase().includes(hint) || hint.includes(c.name.toLowerCase())) : undefined;
+  await updateOrder(orderId, {
+    status: statusFor(parsed.lines),
+    totalCents: parsed.total_cents,
+    customerHint: parsed.customer_name,
+    deliveryNote: parsed.delivery_note,
+    customerId: match?.id ?? null,
+    recipientName: match?.name ?? parsed.customer_name,
+    recipientEmail: match?.email ?? null,
+    error: null,
+  });
+}
+
+export const EDITABLE: OrderStatus[] = ['draft', 'needs_info', 'failed'];
+
+/**
+ * Apply the owner's edits. Lines are re-priced from the catalog on the server:
+ * the client only says which SKU and how many.
+ */
+export async function editOrder(
+  id: string,
+  patch: {
+    lines?: (Pick<LineInput, 'raw_text' | 'sku' | 'flags' | 'flag_reason' | 'candidate_skus'> & { qty: number | null })[];
+    customerId?: string | null;
+    recipientName?: string | null;
+    recipientEmail?: string | null;
+    deliveryNote?: string | null;
+  },
+): Promise<OrderDetail> {
+  const current = await getOrder(id);
+  if (!current) throw new HttpError(404, 'Order not found');
+  if (!EDITABLE.includes(current.status)) throw new HttpError(409, `Order is ${current.status} and can no longer be edited.`);
+
+  const update: Partial<typeof orders.$inferInsert> = {};
+  if (patch.customerId !== undefined) {
+    update.customerId = patch.customerId;
+    const c = patch.customerId ? (await listCustomers()).find((x) => x.id === patch.customerId) : undefined;
+    if (patch.customerId && !c) throw new HttpError(400, 'Unknown customer');
+    if (c) {
+      update.recipientName = c.name;
+      update.recipientEmail = c.email;
+    }
+  }
+  if (patch.recipientName !== undefined) update.recipientName = patch.recipientName;
+  if (patch.recipientEmail !== undefined) update.recipientEmail = patch.recipientEmail?.trim() || null;
+  if (patch.deliveryNote !== undefined) update.deliveryNote = patch.deliveryNote;
+
+  if (patch.lines) {
+    const lines = patch.lines.map((l) =>
+      resolveLine({
+        raw_text: l.raw_text,
+        sku: l.sku,
+        quantity: l.qty,
+        quantity_unit: 'unit',
+        confidence: 1,
+        flags: l.flags,
+        flag_reason: l.flag_reason,
+        candidate_skus: l.candidate_skus,
+      }),
+    );
+    await writeLines(id, lines);
+    update.totalCents = totalCents(lines);
+    update.status = statusFor(lines);
+    update.error = null;
+  }
+  await updateOrder(id, update);
+  return (await getOrder(id))!;
+}
+
+export async function getOrder(id: string): Promise<OrderDetail | null> {
+  const db = await getDb();
+  const [order] = await db.select().from(orders).where(eq(orders.id, id));
+  if (!order) return null;
+  const lineRows = await db.select().from(orderLines).where(eq(orderLines.orderId, id)).orderBy(asc(orderLines.position));
+  const eventRows = await db.select().from(events).where(eq(events.orderId, id)).orderBy(asc(events.id));
+  const lines = lineRows.map(toParsedLine);
+  return {
+    ...order,
+    lines,
+    events: eventRows,
+    blocker: approvalBlocker({ lines, recipientEmail: order.recipientEmail, recipientName: order.recipientName }),
+  };
+}
+
+export async function listOrders(): Promise<OrderRow[]> {
+  const db = await getDb();
+  return db.select().from(orders).orderBy(desc(orders.createdAt));
+}
+
+export async function findOrderByInvoiceId(invoiceId: string): Promise<OrderRow | null> {
+  const db = await getDb();
+  const [row] = await db.select().from(orders).where(eq(orders.invoiceId, invoiceId));
+  return row ?? null;
+}
+
+export async function listCustomers(): Promise<CustomerRow[]> {
+  const db = await getDb();
+  return db.select().from(customers).orderBy(asc(customers.name));
+}
+
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}

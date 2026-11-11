@@ -1,0 +1,45 @@
+[
+  {
+    "id": "clean",
+    "label": "Clean order",
+    "tests": "Case-to-unit conversion (2 cases = 40 sleeves)",
+    "text": "Need 2 cases of 12 oz hot cups and 5 boxes of coffee filters. Ship to Main St Cafe."
+  },
+  {
+    "id": "spanglish",
+    "label": "Spanish/English mix",
+    "tests": "Spanish words via aliases, delivery note",
+    "text": "Hola! Necesito 10 paquetes de servilletas y 4 jugs of dish soap para mañana por favor. Te pago por PayPal. Gracias, Rosa's Taqueria"
+  },
+  {
+    "id": "ambiguous",
+    "label": "Ambiguous",
+    "tests": "Cup size unclear, no quantity, needs order history. Must ask, not guess",
+    "text": "5 cases of cups and some napkins, same as last time"
+  },
+  {
+    "id": "out_of_stock",
+    "label": "Out of stock",
+    "tests": "Only 25 in stock: offer 25 now or wait",
+    "text": "30 packs of the small to-go containers, urgent"
+  },
+  {
+    "id": "unknown_item",
+    "label": "Unknown item",
+    "tests": "Chef knives are not in the catalog: flag the line, price the rest",
+    "text": "10 chef knives and 3 jugs of sanitizer"
+  },
+  {
+    "id": "photo",
+    "label": "Handwritten photo",
+    "tests": "Claude vision reads a handwritten list with the same items as the clean order",
+    "image": "/samples/handwritten-order.png",
+    "text": ""
+  },
+  {
+    "id": "email_forward",
+    "label": "Email forward",
+    "tests": "Ignore the signature and the old quoted order",
+    "text": "From: Sam Carter <sam@mainstcafe.example>\nSubject: Fwd: order for this week\n\nHi,\n\nPlease send 4 cases of the 33 gallon trash bags and 12 boxes of large gloves this week.\n\nThanks,\nSam Carter\nMain St Cafe | (555) 010-0142\nSent from my phone\n\n> On Mon, Oct 26, 2026, Sam Carter wrote:\n> Please send 60 sleeves of 16 oz cups and 2 jugs of sanitizer.\n> Thanks, Sam"
+  }
+]

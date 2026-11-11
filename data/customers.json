@@ -1,0 +1,6 @@
+[
+  { "id": "cust_rosas", "name": "Rosa's Taqueria", "email": "orders@rosastaqueria.example" },
+  { "id": "cust_mainst", "name": "Main St Cafe", "email": "sam@mainstcafe.example" },
+  { "id": "cust_harborview", "name": "Harborview Diner", "email": "accounts@harborviewdiner.example" },
+  { "id": "cust_walkin", "name": "Walk-in customer", "email": "counter@orderdesk.example" }
+]

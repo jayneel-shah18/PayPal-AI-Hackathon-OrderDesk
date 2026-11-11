@@ -1,0 +1,10 @@
+node_modules
+.next
+# Secrets: every env file is ignored except the empty template
+.env
+.env.*
+!.env.example
+.data
+*.tsbuildinfo
+next-env.d.ts
+*.tmp.*

@@ -1,0 +1,13 @@
+sku,name,brand,unit,pack_size,price_usd,stock,aliases
+HBR-CUP-12,Paper hot cup 12 oz (sleeve of 50),Harbor,sleeve,20,4.50,400,"12 oz cup|12oz cup|12 oz hot cup|coffee cup|vasos de 12"
+HBR-CUP-16,Paper hot cup 16 oz (sleeve of 50),Harbor,sleeve,20,5.25,300,"16 oz cup|16oz cup|16 oz hot cup|large cup|vasos de 16"
+HBR-LID-HOT,Hot cup lid for 12-16 oz (sleeve of 50),Harbor,sleeve,20,2.75,500,"lid|cup lid|sip lid|tapas"
+HBR-CLAM-9,To-go clamshell container 9 in (pack of 50),Harbor,pack,4,11.00,120,"to-go container|togo box|clamshell|takeout container|contenedores para llevar"
+HBR-CLAM-6,To-go clamshell container 6 in (pack of 50),Harbor,pack,4,8.00,25,"small to-go container|small clamshell|6 inch container"
+HBR-NAP-DISP,Dispenser napkins (pack of 250),Harbor,pack,24,3.20,600,"napkin|dispenser napkin|servilletas"
+HBR-FLT-12,Coffee filters 12-cup basket (box of 250),Harbor,box,12,6.50,150,"coffee filter|basket filter|filtros de cafe"
+BRT-SAN-1G,Sanitizer concentrate 1 gal,Brightline,jug,4,14.00,90,"sanitizer|sanitizing solution|desinfectante"
+BRT-DSH-1G,Dish soap 1 gal,Brightline,jug,4,9.75,200,"dish soap|dish detergent|jabon para platos|jabon"
+BRT-BAG-33,Trash bags 33 gal (roll of 25),Brightline,roll,10,7.40,300,"trash bag|garbage bag|can liner|bolsas de basura"
+GEN-GLV-L,Nitrile gloves large (box of 100),Generic,box,10,8.90,240,"glove|nitrile glove|large glove|guantes"
+GEN-TWL-RL,Paper towel roll,Generic,roll,12,2.10,480,"paper towel|kitchen towel|toallas de papel"
