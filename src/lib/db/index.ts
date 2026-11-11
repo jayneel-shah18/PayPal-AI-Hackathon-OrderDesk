@@ -35,7 +35,7 @@ async function connect(): Promise<Db> {
   return db;
 }
 
-async function seedCustomers(db: Db) {
+export async function seedCustomers(db: Db) {
   const file = path.join(process.cwd(), 'data', 'customers.json');
   const rows = JSON.parse(fs.readFileSync(file, 'utf8')) as { id: string; name: string; email: string }[];
   // PAYPAL_BUYER_EMAIL points every demo customer at the sandbox buyer so the invoice can be paid.

@@ -31,11 +31,41 @@ function toParsedLine(row: typeof orderLines.$inferSelect): ParsedLine {
   };
 }
 
-export async function createOrder(input: { rawText: string; source: 'text' | 'photo' }): Promise<OrderRow> {
+/**
+ * How far back a message's received time may be. Older, future or malformed
+ * values are ignored and the order is stamped with the current time instead.
+ */
+const MAX_RECEIVED_AGE_MS = 30 * 86_400_000;
+
+export function parseReceivedAt(value: unknown, now: Date = new Date()): Date | undefined {
+  if (typeof value !== 'string') return undefined;
+  const d = new Date(value);
+  const t = d.getTime();
+  if (!Number.isFinite(t) || t > now.getTime() + 60_000 || t < now.getTime() - MAX_RECEIVED_AGE_MS) return undefined;
+  return d;
+}
+
+export async function createOrder(input: {
+  rawText: string;
+  source: 'text' | 'photo';
+  /** The customer the message came from, when the sender is already known. */
+  customerId?: string | null;
+  /** When the message arrived. Shown everywhere as the order's received time. */
+  receivedAt?: Date;
+}): Promise<OrderRow> {
   const db = await getDb();
+  const sender = input.customerId ? (await listCustomers()).find((c) => c.id === input.customerId) : undefined;
+  if (input.customerId && !sender) throw new HttpError(400, 'Unknown customer');
   const [row] = await db
     .insert(orders)
-    .values({ id: newOrderId(), rawText: input.rawText, source: input.source, status: 'parsing' })
+    .values({
+      id: newOrderId(),
+      rawText: input.rawText,
+      source: input.source,
+      status: 'parsing',
+      ...(sender ? { customerId: sender.id, recipientName: sender.name, recipientEmail: sender.email } : {}),
+      ...(input.receivedAt ? { createdAt: input.receivedAt } : {}),
+    })
     .returning();
   return row;
 }
@@ -80,22 +110,30 @@ function statusFor(lines: ParsedLine[]): OrderStatus {
   return lines.length === 0 || lines.some((l) => l.flags.length) ? 'needs_info' : 'draft';
 }
 
-/** Store the parser's result and match the customer named in the order, if any. */
+/**
+ * Store the parser's result. If the sender was already known when the message
+ * arrived, that customer is kept; otherwise match the customer named in the order, if any.
+ */
 export async function saveParsedOrder(orderId: string, parsed: ParsedOrder): Promise<void> {
   await writeLines(orderId, parsed.lines);
-  const all = await listCustomers();
-  const hint = parsed.customer_name?.toLowerCase();
-  const match = hint ? all.find((c) => c.name.toLowerCase().includes(hint) || hint.includes(c.name.toLowerCase())) : undefined;
-  await updateOrder(orderId, {
+  const db = await getDb();
+  const [current] = await db.select({ customerId: orders.customerId }).from(orders).where(eq(orders.id, orderId));
+  const update: Partial<typeof orders.$inferInsert> = {
     status: statusFor(parsed.lines),
     totalCents: parsed.total_cents,
     customerHint: parsed.customer_name,
     deliveryNote: parsed.delivery_note,
-    customerId: match?.id ?? null,
-    recipientName: match?.name ?? parsed.customer_name,
-    recipientEmail: match?.email ?? null,
     error: null,
-  });
+  };
+  if (!current?.customerId) {
+    const all = await listCustomers();
+    const hint = parsed.customer_name?.toLowerCase();
+    const match = hint ? all.find((c) => c.name.toLowerCase().includes(hint) || hint.includes(c.name.toLowerCase())) : undefined;
+    update.customerId = match?.id ?? null;
+    update.recipientName = match?.name ?? parsed.customer_name;
+    update.recipientEmail = match?.email ?? null;
+  }
+  await updateOrder(orderId, update);
 }
 
 export const EDITABLE: OrderStatus[] = ['draft', 'needs_info', 'failed'];

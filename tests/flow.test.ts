@@ -85,6 +85,25 @@ describe('order flow against an in-memory database', () => {
     expect(o.events.filter((e) => e.kind === 'tool_call')).toHaveLength(2);
   });
 
+  it('keeps the known sender and received time when the order names no customer', async () => {
+    const receivedAt = new Date(Date.now() - 3 * 3_600_000);
+    const order = await orders.createOrder({ rawText: '5 cases of cups and some napkins, same as last time', source: 'text', customerId: 'cust_harborview', receivedAt });
+    await orders.saveParsedOrder(order.id, { customer_name: null, delivery_note: null, lines: [], total_cents: 0, needs_info: true });
+    const saved = (await orders.getOrder(order.id))!;
+    expect(saved).toMatchObject({ customerId: 'cust_harborview', recipientName: 'Harborview Diner', recipientEmail: 'accounts@harborviewdiner.example' });
+    expect(saved.createdAt.getTime()).toBe(receivedAt.getTime());
+    await expect(orders.createOrder({ rawText: 'x', source: 'text', customerId: 'cust_nobody' })).rejects.toThrow(/Unknown customer/);
+  });
+
+  it('accepts only a sensible received time', () => {
+    const now = new Date('2026-11-11T18:00:00Z');
+    expect(orders.parseReceivedAt('2026-11-11T07:18:00Z', now)?.toISOString()).toBe('2026-11-11T07:18:00.000Z');
+    expect(orders.parseReceivedAt('2026-11-12T07:18:00Z', now)).toBeUndefined(); // future
+    expect(orders.parseReceivedAt('2026-01-01T00:00:00Z', now)).toBeUndefined(); // too old
+    expect(orders.parseReceivedAt('yesterday-ish', now)).toBeUndefined();
+    expect(orders.parseReceivedAt(undefined, now)).toBeUndefined();
+  });
+
   it('re-prices edits on the server and flags a quantity above stock', async () => {
     const o = await draftOrder();
     const edited = await orders.editOrder(o.id, { lines: [{ raw_text: 'small containers', sku: 'HBR-CLAM-6', qty: 30 }] });

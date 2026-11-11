@@ -1,6 +1,6 @@
 import { after, NextResponse } from 'next/server';
 import { fail } from '@/lib/http';
-import { addEvent, createOrder, HttpError, saveParsedOrder, updateOrder } from '@/lib/orders';
+import { addEvent, createOrder, HttpError, parseReceivedAt, saveParsedOrder, updateOrder } from '@/lib/orders';
 import { parseOrder } from '@/lib/parse';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
  */
 export async function POST(req: Request) {
   try {
-    const body = (await req.json().catch(() => null)) as { text?: unknown; image?: unknown } | null;
+    const body = (await req.json().catch(() => null)) as { text?: unknown; image?: unknown; customerId?: unknown; receivedAt?: unknown } | null;
     const text = typeof body?.text === 'string' ? body.text.trim() : '';
     let image: { base64: string; mediaType: string } | undefined;
     if (typeof body?.image === 'string' && body.image) {
@@ -29,7 +29,13 @@ export async function POST(req: Request) {
     if (text.length > MAX_TEXT) throw new HttpError(413, `Order text is too long (${MAX_TEXT} characters max).`);
     if (!process.env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ANTHROPIC_API_KEY is not set on the server.');
 
-    const order = await createOrder({ rawText: text || '[Photo of a handwritten order]', source: image ? 'photo' : 'text' });
+    const order = await createOrder({
+      rawText: text || '[Photo of a handwritten order]',
+      source: image ? 'photo' : 'text',
+      // Inbox messages arrive with a known sender and a received time; a pasted order has neither.
+      customerId: typeof body?.customerId === 'string' && body.customerId ? body.customerId : null,
+      receivedAt: parseReceivedAt(body?.receivedAt),
+    });
     await addEvent(order.id, 'step', image ? 'Reading the photo' : 'Reading the order');
 
     after(async () => {

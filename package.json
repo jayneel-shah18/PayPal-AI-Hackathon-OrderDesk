@@ -12,7 +12,8 @@
     "db:seed": "tsx scripts/seed.ts",
     "paypal:roundtrip": "tsx scripts/paypal-roundtrip.ts",
     "test:live": "LIVE=1 vitest run tests/live",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "db:reset": "tsx scripts/seed.ts --reset"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.102",

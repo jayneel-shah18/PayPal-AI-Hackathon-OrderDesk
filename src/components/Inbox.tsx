@@ -69,7 +69,8 @@ export function Inbox() {
         customer: order?.recipientName ?? sender.customer,
         channel: sender.channel,
         preview: previewOf(sender.channel, s.text),
-        received: todayAt(sender.at, now),
+        // Once read, the order carries the received time, so every screen shows the same one.
+        received: order ? new Date(order.createdAt) : todayAt(sender.at, now),
         order,
         sample: order ? undefined : s,
       });
@@ -107,7 +108,12 @@ export function Inbox() {
           reader.readAsDataURL(blob);
         });
       }
-      const { id } = await api<{ id: string }>('/api/parse', { method: 'POST', body: { text: m.sample.text, image } });
+      // The sender and arrival time are known for an inbox message, so the order keeps both.
+      const customerId = meta?.customers.find((c) => c.name === m.customer)?.id;
+      const { id } = await api<{ id: string }>('/api/parse', {
+        method: 'POST',
+        body: { text: m.sample.text, image, customerId, receivedAt: m.received.toISOString() },
+      });
       router.push(`/orders/${id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

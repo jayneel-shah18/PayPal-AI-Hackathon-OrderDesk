@@ -136,6 +136,8 @@ npm run typecheck
 3. In the PayPal Developer Dashboard, open your sandbox app, add a webhook for `https://<your-app>.onrender.com/api/webhooks/paypal` with the events `Invoicing invoice paid` and `Invoicing invoice cancelled`, and put its ID in `PAYPAL_WEBHOOK_ID`.
 4. Optionally run `npm run db:seed` once with `DATABASE_URL` set, to fill the orders page.
 
+To start over with clean demo data, run `npm run db:reset` with `DATABASE_URL` set. It deletes every order and customer in that database, restores the customers from `data/customers.json` and seeds the sample history again.
+
 Free Render services sleep when idle; the first request after a pause takes about a minute.
 
 ## How to test (for judges)

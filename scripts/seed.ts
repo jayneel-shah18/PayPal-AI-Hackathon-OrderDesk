@@ -3,10 +3,11 @@
  * Orders are priced through the same catalog code as real ones. No PayPal calls are made:
  * seeded invoices are local records only.
  *
- *   npm run db:seed
+ *   npm run db:seed    add the sample history (skipped if orders already exist)
+ *   npm run db:reset   delete ALL orders and customers first, then seed
  */
 import './env';
-import { getDb, schema } from '../src/lib/db';
+import { getDb, schema, seedCustomers } from '../src/lib/db';
 import { addEvent, createOrder, saveParsedOrder, updateOrder } from '../src/lib/orders';
 import { resolveOrder } from '../src/lib/pricing';
 import type { OrderStatus } from '../src/lib/schema';
@@ -23,6 +24,17 @@ const SEEDS: Seed[] = [
 
 async function main() {
   const db = await getDb();
+  if (process.argv.includes('--reset')) {
+    // Wipe every order and customer, then restore the customers from data/customers.json.
+    const where = process.env.DATABASE_URL ? `Postgres at ${new URL(process.env.DATABASE_URL).host}` : 'the local database in ./.data';
+    const before = await db.select({ id: schema.orders.id }).from(schema.orders);
+    await db.delete(schema.events);
+    await db.delete(schema.orderLines);
+    await db.delete(schema.orders);
+    await db.delete(schema.customers);
+    await seedCustomers(db);
+    console.log(`Reset ${where}: removed ${before.length} order(s) and all customers, restored the customers from data/customers.json.`);
+  }
   const existing = await db.select({ id: schema.orders.id }).from(schema.orders);
   if (existing.length && !process.argv.includes('--force')) {
     console.log(`Database already has ${existing.length} order(s). Run with --force to add the seed orders anyway.`);
