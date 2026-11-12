@@ -154,6 +154,7 @@ describe('order flow against an in-memory database', () => {
     expect(paypal.calls).toEqual([]);
     expect(done.status).toBe('failed');
     expect(done.invoiceId).toBeNull();
+    expect(actions(done)).toContain('Invoicing failed'); // an approved order that could not be invoiced is still a failure
     const blocked = done.events.find((e) => e.action === GUARDRAIL.priceNotInCatalog)!;
     expect(blocked).toMatchObject({ actor: 'agent', detail: { guardrail: true, catalog_price_usd: '3.20', proposed_price_usd: '0.01', tool: 'create_invoice' } });
   });
@@ -176,6 +177,13 @@ describe('order flow against an in-memory database', () => {
     expect(audit.isGuardrail(blocked)).toBe(true);
     expect(actions(after)).toContain(GUARDRAIL.createBeforeApproval);
     expect(actions(after)).not.toContain('Owner approved');
+    // The run ends as a neutral "held" entry, not a failure.
+    const held = after.events.at(-1)!;
+    expect(held.action).toBe('Invoice held: waiting on owner approval');
+    expect(held.detail).toMatchObject({ held: true });
+    expect(held.detail).not.toHaveProperty('error');
+    expect(actions(after)).not.toContain('Invoicing failed');
+    expect(JSON.stringify(after.events)).not.toContain('I was not allowed to send it');
   });
 
   it('guardrail: a product the AI invents is blocked and logged', async () => {

@@ -46,6 +46,9 @@ export function itemsTotalCents(items: unknown): number | null {
   return total;
 }
 
+/** Logged when the invoicing agent stops because the owner has not approved the order. */
+export const INVOICE_HELD = 'Invoice held: waiting on owner approval';
+
 export type Refusal = { action: string; reason: string; detail?: Record<string, unknown> };
 
 /**
@@ -198,9 +201,14 @@ export async function runApproval(order: OrderDetail, deps: ApproveDeps = {}): P
     await logEvent(order.id, 'paypal', `Invoice ${invoice.invoiceNumber ?? state.invoiceId} awaiting payment`, { paypal_status: invoice.status, payer_link: invoice.recipientViewUrl });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    // An order the owner never approved keeps its status: the agent was stopped, nothing failed.
-    if (await ownerHasApproved(order.id)) await updateOrder(order.id, { status: 'failed', error: message });
-    await logEvent(order.id, 'agent', 'Invoicing failed', { error: message });
+    if (await ownerHasApproved(order.id)) {
+      await updateOrder(order.id, { status: 'failed', error: message });
+      await logEvent(order.id, 'agent', 'Invoicing failed', { error: message });
+    } else {
+      // The owner never approved, so the guard stopped the agent. Nothing failed: the order
+      // keeps its status and the invoice simply waits. The guardrail entry above says why.
+      await logEvent(order.id, 'agent', INVOICE_HELD, { held: true, note: 'No invoice was created or sent. The order is unchanged and still needs the owner to approve it.' });
+    }
   }
 }
 

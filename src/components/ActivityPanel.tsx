@@ -62,13 +62,15 @@ export function ActivityPanel({ events, live }: { events: TimelineEvent[]; live:
           const d = detailOf(e);
           const guardrail = isGuardrailEvent(e);
           const failed = !guardrail && typeof d?.error === 'string';
+          // A held invoice is expected, not a problem: shown in neutral grey so only guardrails stand out.
+          const held = !guardrail && d?.held === true;
           const actor = ACTOR[e.actor] ?? ACTOR.agent;
           const note = guardrail ? (d?.reason as string | undefined) : failed ? (d?.error as string) : undefined;
           return (
-            <li key={e.id} className="event-in relative flex gap-2.5 pb-3.5 last:pb-0" data-actor={e.actor} data-guardrail={guardrail || undefined}>
+            <li key={e.id} className="event-in relative flex gap-2.5 pb-3.5 last:pb-0" data-actor={e.actor} data-guardrail={guardrail || undefined} data-held={held || undefined}>
               {i < events.length - 1 && <span className="absolute left-[11px] top-6 h-full w-px bg-rule" />}
               <span
-                className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${guardrail ? 'bg-brick-soft text-brick' : actor.tone}`}
+                className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${guardrail ? 'bg-brick-soft text-brick' : held ? 'bg-paper text-muted' : actor.tone}`}
                 title={actor.label}
               >
                 <ActorIcon actor={e.actor} />
@@ -85,7 +87,7 @@ export function ActivityPanel({ events, live }: { events: TimelineEvent[]; live:
                     {shortTime(e.createdAt)}
                   </time>
                 </p>
-                <p className={`text-sm leading-snug ${guardrail ? 'font-semibold text-amber-ink' : failed ? 'font-medium text-brick' : 'font-medium'}`}>{e.action}</p>
+                <p className={`text-sm leading-snug ${guardrail ? 'font-semibold text-amber-ink' : failed ? 'font-medium text-brick' : held ? 'text-muted' : 'font-medium'}`}>{e.action}</p>
                 {note && <p className={`mt-0.5 break-words text-xs ${guardrail ? 'text-amber-ink' : 'text-brick'}`}>{note}</p>}
                 {d && (
                   <details className="mt-0.5">
