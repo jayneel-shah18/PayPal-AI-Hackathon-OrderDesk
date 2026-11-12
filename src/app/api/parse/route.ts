@@ -1,6 +1,9 @@
 import { after, NextResponse } from 'next/server';
 import { fail } from '@/lib/http';
-import { addEvent, createOrder, HttpError, parseReceivedAt, saveParsedOrder, updateOrder } from '@/lib/orders';
+import { logEvent, logParseResult } from '@/lib/audit';
+import { MODEL_ID } from '@/lib/model';
+import { createOrder, HttpError, parseReceivedAt, saveParsedOrder, updateOrder } from '@/lib/orders';
+import type { ExtractedOrder } from '@/lib/schema';
 import { parseOrder } from '@/lib/parse';
 
 export const dynamic = 'force-dynamic';
@@ -36,21 +39,26 @@ export async function POST(req: Request) {
       customerId: typeof body?.customerId === 'string' && body.customerId ? body.customerId : null,
       receivedAt: parseReceivedAt(body?.receivedAt),
     });
-    await addEvent(order.id, 'step', image ? 'Reading the photo' : 'Reading the order');
+    await logEvent(order.id, 'agent', 'Message received', { channel: image ? 'photo' : 'text', from: order.recipientName ?? 'not yet known' });
 
     after(async () => {
       try {
+        let extracted: ExtractedOrder | undefined;
         const parsed = await parseOrder(
           { text, image },
-          { onTool: (e) => addEvent(order.id, 'tool_call', `Catalog · ${e.tool}`, { input: e.input, output: e.output }) },
+          {
+            onTool: (e) => logEvent(order.id, 'agent', `Searched catalog: "${(e.input as { query?: string }).query ?? ''}"`, { tool: e.tool, matches: e.output }),
+            onExtracted: (x) => {
+              extracted = x;
+            },
+          },
         );
         await saveParsedOrder(order.id, parsed);
-        const flagged = parsed.lines.filter((l) => l.flags.length).length;
-        await addEvent(order.id, 'step', `Priced ${parsed.lines.length} line(s) from the catalog${flagged ? `, ${flagged} flagged for review` : ''}`);
+        await logParseResult(order.id, extracted, parsed, MODEL_ID);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         await updateOrder(order.id, { status: 'failed', error: message });
-        await addEvent(order.id, 'error', 'Could not read the order', { error: message });
+        await logEvent(order.id, 'agent', 'Could not read the order', { error: message });
       }
     });
 

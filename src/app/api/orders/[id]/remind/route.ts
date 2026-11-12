@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fail, type RouteCtx } from '@/lib/http';
-import { addEvent, getOrder, HttpError } from '@/lib/orders';
+import { logEvent } from '@/lib/audit';
+import { getOrder, HttpError } from '@/lib/orders';
 import { callPayPalTool } from '@/lib/paypal';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export async function POST(_req: Request, ctx: RouteCtx) {
       subject: `Reminder: invoice ${order.invoiceNumber ?? ''}`.trim(),
       note: 'A friendly reminder that this invoice is awaiting payment.',
     });
-    await addEvent(order.id, 'tool_call', 'PayPal · send_invoice_reminder', { input: { invoice_id: order.invoiceId } });
+    await logEvent(order.id, 'owner', 'Owner sent a payment reminder', { invoice_id: order.invoiceId, tool: 'send_invoice_reminder' });
     return NextResponse.json({ ok: true });
   } catch (e) {
     return fail(e);

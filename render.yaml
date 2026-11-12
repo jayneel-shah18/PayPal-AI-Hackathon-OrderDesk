@@ -9,6 +9,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22
+      # Shows the Reset demo button and enables POST /demo/reset. Set to false to turn both off.
+      - key: DEMO_MODE
+        value: "true"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: PAYPAL_CLIENT_ID

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LogoMark, PlusIcon } from './Icons';
+import { ResetDemo } from './ResetDemo';
 
 const LINKS = [
   { href: '/', label: 'Inbox', active: (p: string) => p === '/' },
@@ -16,7 +17,7 @@ export function Nav() {
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-5">
         <Link href="/" className="flex items-center gap-2.5">
           <LogoMark />
-          <span className="font-display text-xl font-semibold tracking-tight">OrderDesk</span>
+          <span className="hidden font-display text-xl font-semibold tracking-tight min-[430px]:inline">OrderDesk</span>
         </Link>
         <nav className="ml-1 flex items-center gap-1 text-sm sm:ml-4" aria-label="Main">
           {LINKS.map((l) => (
@@ -24,13 +25,15 @@ export function Nav() {
               key={l.href}
               href={l.href}
               aria-current={l.active(path) ? 'page' : undefined}
-              className={`rounded-md px-3 py-1.5 font-medium transition ${l.active(path) ? 'bg-leaf-soft text-leaf' : 'text-muted hover:bg-paper hover:text-ink'}`}
+              className={`rounded-md px-2.5 py-1.5 font-medium transition sm:px-3 ${l.active(path) ? 'bg-leaf-soft text-leaf' : 'text-muted hover:bg-paper hover:text-ink'}`}
             >
               {l.label}
             </Link>
           ))}
         </nav>
-        <Link href="/new" className="btn ml-auto" aria-label="New order">
+        <span className="ml-auto" />
+        <ResetDemo />
+        <Link href="/new" className="btn" aria-label="New order">
           <PlusIcon />
           <span className="sm:hidden">New</span>
           <span className="hidden sm:inline">New order</span>

@@ -6,13 +6,15 @@ import { api, type Meta } from '@/lib/client';
 import type { OrderDetail } from '@/lib/orders';
 import { formatUsd, MODEL_FLAGS, type ParsedLine } from '@/lib/schema';
 import { CHANNEL_LABEL, channelOf } from '@/lib/inbox';
-import { ActivityPanel } from './ActivityPanel';
+import { ActivityPanel, type TimelineEvent } from './ActivityPanel';
+import { applyQuantityEdit } from '@/lib/totals';
 import { ChannelIcon } from './Icons';
+import { LinesGrid } from './LinesGrid';
 import { StatusChip } from './StatusChip';
 
 type Order = Omit<OrderDetail, 'createdAt' | 'updatedAt' | 'events'> & {
   createdAt: string;
-  events: { id: number; kind: string; label: string; detail: unknown; createdAt: string }[];
+  events: TimelineEvent[];
 };
 
 const FLAG_LABEL: Record<string, string> = {
@@ -102,6 +104,41 @@ export function OrderReview({ id }: { id: string }) {
       i,
     );
   const stockOf = (sku: string | null) => meta?.catalog.find((c) => c.sku === sku)?.stock;
+  /** Change one line's quantity: totals update at once, then the server re-prices and saves. */
+  const setQty = (i: number, qty: number | null) => {
+    const next = applyQuantityEdit(lines, i, qty);
+    setOrder({ ...order, lines: next.lines, totalCents: next.totalCents });
+    return saveLines(next.lines, i);
+  };
+  const flagBlock = (l: ParsedLine, i: number) => {
+    const stock = stockOf(l.sku);
+    return (
+      <div className="mt-2 rounded-lg border border-amber-rule bg-white/60 px-3 py-2 text-amber-ink">
+        <p className="text-xs font-semibold">{l.flags.map((f) => FLAG_LABEL[f] ?? f).join(' · ')}</p>
+        {l.flag_reason && <p className="mt-0.5 text-sm">{l.flag_reason}</p>}
+        {editable && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {!l.sku &&
+              l.candidates.map((c) => (
+                <button key={c.sku} className="btn !whitespace-normal !py-1 !text-left !text-xs" disabled={saving} onClick={() => setLine(i, { sku: c.sku })}>
+                  {c.name}
+                </button>
+              ))}
+            {l.flags.includes('out_of_stock') && stock != null && stock > 0 && (
+              <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setQty(i, stock)}>
+                Send {stock} now
+              </button>
+            )}
+            {l.sku && l.qty && !l.flags.includes('out_of_stock') && (
+              <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, {})}>
+                Looks right
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
   const channel = channelOf(order.source, order.rawText);
   const customer = order.recipientName ?? order.customerHint;
   const received = new Date(order.createdAt);
@@ -155,14 +192,33 @@ export function OrderReview({ id }: { id: string }) {
                     </span>
                   )}
                 </div>
-                <div className="hidden gap-3 border-b border-rule px-4 py-2 sm:flex">
-                  <span className="eyebrow flex-1">Product</span>
-                  <span className="eyebrow w-20">Qty</span>
-                  <span className="eyebrow w-20 text-right">Each</span>
-                  <span className="eyebrow w-24 text-right">Total</span>
-                  <span className="w-6" />
+                {/* Laptop and up: AG Grid with editable quantity. Phone: the stacked list below. */}
+                <div className="hidden sm:block">
+                  <LinesGrid
+                    lines={lines}
+                    totalCents={order.totalCents}
+                    catalog={meta?.catalog ?? []}
+                    editable={editable && !saving}
+                    onQty={setQty}
+                    onSku={(i, sku) => setLine(i, { sku })}
+                    onRemove={(i) => saveLines(lines.filter((_, j) => j !== i))}
+                  />
+                  {flaggedCount > 0 && (
+                    <ul className="space-y-2 border-t border-rule bg-amber-soft px-4 py-3">
+                      {lines.map((l, i) =>
+                        l.flags.length > 0 ? (
+                          <li key={i}>
+                            <p className="text-xs text-amber-ink">
+                              Line {i + 1}: “{l.raw_text}”
+                            </p>
+                            {flagBlock(l, i)}
+                          </li>
+                        ) : null,
+                      )}
+                    </ul>
+                  )}
                 </div>
-                <ul className="divide-y divide-rule">
+                <ul className="divide-y divide-rule sm:hidden">
                   {lines.length === 0 && <li className="px-4 py-8 text-center text-sm text-muted">No lines yet. Add one below.</li>}
                   {lines.map((l, i) => {
                     const flagged = l.flags.length > 0;
@@ -190,7 +246,7 @@ export function OrderReview({ id }: { id: string }) {
                             </p>
                           </div>
                           <div className="w-20">
-                            <QtyInput value={l.qty} disabled={!editable || saving} onCommit={(qty) => setLine(i, { qty })} label={`Quantity for line ${i + 1}`} />
+                            <QtyInput value={l.qty} disabled={!editable || saving} onCommit={(qty) => setQty(i, qty)} label={`Quantity for line ${i + 1}`} />
                             {l.unit && <p className="mt-1 text-xs text-muted">{/(x|s|ch)$/.test(l.unit) ? `${l.unit}es` : `${l.unit}s`}</p>}
                           </div>
                           <div className="num w-20 pt-1.5 text-right text-sm text-muted">
@@ -212,37 +268,12 @@ export function OrderReview({ id }: { id: string }) {
                             )}
                           </div>
                         </div>
-                        {flagged && (
-                          <div className="mt-2 rounded-lg border border-amber-rule bg-white/60 px-3 py-2 text-amber-ink">
-                            <p className="text-xs font-semibold">{l.flags.map((f) => FLAG_LABEL[f] ?? f).join(' · ')}</p>
-                            {l.flag_reason && <p className="mt-0.5 text-sm">{l.flag_reason}</p>}
-                            {editable && (
-                              <div className="mt-2 flex flex-wrap gap-1.5">
-                                {!l.sku &&
-                                  l.candidates.map((c) => (
-                                    <button key={c.sku} className="btn !whitespace-normal !py-1 !text-left !text-xs" disabled={saving} onClick={() => setLine(i, { sku: c.sku })}>
-                                      {c.name}
-                                    </button>
-                                  ))}
-                                {l.flags.includes('out_of_stock') && stock != null && stock > 0 && (
-                                  <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, { qty: stock })}>
-                                    Send {stock} now
-                                  </button>
-                                )}
-                                {l.sku && l.qty && !l.flags.includes('out_of_stock') && (
-                                  <button className="btn !py-1 !text-xs" disabled={saving} onClick={() => setLine(i, {})}>
-                                    Looks right
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {flagged && flagBlock(l, i)}
                       </li>
                     );
                   })}
                 </ul>
-                <div className="flex items-center gap-3 border-t border-rule bg-paper/50 px-4 py-3">
+                <div className={`flex items-center gap-3 border-t border-rule bg-paper/50 px-4 py-3 ${editable ? "" : "sm:hidden"}`}>
                   {editable && (
                     <button
                       className="btn !py-1 !text-xs"
@@ -257,9 +288,8 @@ export function OrderReview({ id }: { id: string }) {
                       + Add line
                     </button>
                   )}
-                  <span className="eyebrow ml-auto">Invoice total</span>
-                  <span className="num text-xl font-semibold">{formatUsd(order.totalCents)}</span>
-                  <span className="hidden w-6 sm:block" />
+                  <span className="eyebrow ml-auto sm:hidden">Invoice total</span>
+                  <span className="num text-xl font-semibold sm:hidden">{formatUsd(order.totalCents)}</span>
                 </div>
               </div>
 
