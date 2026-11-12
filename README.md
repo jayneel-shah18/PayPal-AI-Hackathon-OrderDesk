@@ -63,6 +63,8 @@ flowchart LR
 
 **Approval is enforced in code, not in the prompt.** The invoicing agent's PayPal tools are wrapped in a guard ([`src/lib/approve.ts`](src/lib/approve.ts)). `create_invoice` is rejected before it reaches PayPal unless every line's quantity and unit price, the total, the currency and the recipient match what the owner approved. `send_invoice` only accepts the invoice that was just created. After sending, the invoice total is read back from PayPal and compared again.
 
+**Every step is on the record.** Each order has an audit trail in the `order_events` table: who acted (agent, owner or PayPal), what they did and when, from "Message received" through "Catalog match", "Owner approved", "Invoice sent via PayPal", "Webhook verified" and "Paid". The review screen shows it as the **Agent activity** timeline. When a guard stops the agent, that is logged too and shown as a red **Guardrail** chip. For example, an attempt to send before the owner approves is refused and recorded as "Send invoice blocked: waiting on owner approval", and a price that differs from the catalog is recorded as "Price blocked: not the catalog price". The owner approval is read from the database on every PayPal tool call, not assumed.
+
 ### PayPal usage
 
 Through [`@paypal/agent-toolkit`](https://github.com/paypal/agent-toolkit) (sandbox mode, invoice tools only):
@@ -75,7 +77,7 @@ Through [`@paypal/agent-toolkit`](https://github.com/paypal/agent-toolkit) (sand
 | Reminder for unpaid | `send_invoice_reminder` | Send reminder button |
 | QR code for counter payment | `generate_invoice_qr_code` | QR button |
 
-Called directly: `POST /v1/notifications/verify-webhook-signature` to verify every webhook before it is trusted. Events handled: `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.CANCELLED`. Every tool call is recorded and shown on the review screen under "What OrderDesk did".
+Called directly: `POST /v1/notifications/verify-webhook-signature` to verify every webhook before it is trusted. Events handled: `INVOICING.INVOICE.PAID`, `INVOICING.INVOICE.CANCELLED`. Every tool call is recorded and shown on the review screen in the "Agent activity" timeline.
 
 ### Stack
 
@@ -84,8 +86,8 @@ Called directly: `POST /v1/notifications/verify-webhook-signature` to verify eve
 | App | Next.js 15 (App Router), TypeScript, Tailwind |
 | Agent | Vercel AI SDK with the Anthropic provider, `claude-sonnet-5-5` |
 | PayPal | `@paypal/agent-toolkit`, sandbox |
-| Database | Postgres (Neon) with Drizzle ORM. Tables: `customers`, `orders`, `order_lines`, `events` |
-| Grid | AG Grid Community |
+| Database | Postgres (Neon) with Drizzle ORM. Tables: `customers`, `orders`, `order_lines`, `order_events`. SQL migrations in [`migrations/`](migrations) run on startup |
+| Grid | AG Grid Community (no Enterprise features): editable order lines on the review screen, and the Orders page with group headings, a status filter and a pinned total row |
 | Hosting | Render web service ([`render.yaml`](render.yaml)) |
 
 ## Run it locally
@@ -112,6 +114,7 @@ No database setup is needed locally: with `DATABASE_URL` empty the app uses an e
 | `PAYPAL_BUYER_EMAIL` | optional | Sandbox personal account email, used as the billing email for the demo customers |
 | `PAYPAL_INVOICER_EMAIL` | optional | Sandbox business account email shown as the invoicer |
 | `ORDERDESK_MODEL` | optional | Override the model ID |
+| `DEMO_MODE` | optional | `true` shows the **Reset demo** button and enables `POST /demo/reset`. Off when unset. `render.yaml` turns it on |
 
 Secrets live only in `.env.local`, which is gitignored along with every other `.env*` file except the empty `.env.example`. Use sandbox credentials only; the app is hard-wired to the sandbox.
 
@@ -126,7 +129,7 @@ Creates, sends and fetches one hard-coded $212.50 invoice, checks the QR endpoin
 ### Tests
 
 ```bash
-npm test            # offline: catalog search, pricing, approval guard, agent run with a scripted model, webhook handling
+npm test            # offline: catalog search, pricing, approval guard and audit trail, agent run with a scripted model, webhooks, reset, migrations
 npm run test:live   # the seven sample orders against the real model (needs ANTHROPIC_API_KEY)
 npm run typecheck
 ```
@@ -138,14 +141,18 @@ npm run typecheck
 3. In the PayPal Developer Dashboard, open your sandbox app, add a webhook for `https://<your-app>.onrender.com/api/webhooks/paypal` with the events `Invoicing invoice paid` and `Invoicing invoice cancelled`, and put its ID in `PAYPAL_WEBHOOK_ID`.
 4. Optionally run `npm run db:seed` once with `DATABASE_URL` set, to fill the orders page.
 
+Database migrations are plain SQL files in `migrations/`. The app applies any pending ones when it starts, so a deploy is enough. To apply them by hand, run `npm run db:migrate` with `DATABASE_URL` set.
+
 To start over with clean demo data, run `npm run db:reset` with `DATABASE_URL` set. It deletes every order and customer in that database, restores the customers from `data/customers.json` and seeds the sample history again.
+
+With `DEMO_MODE=true`, the **Reset demo** button in the header does the same from the browser: it deletes all orders, order lines and activity history, re-seeds the sample data, and every inbox message shows as New again. It only touches the app's database. It never calls PayPal, so invoices already created in the sandbox are left as they are.
 
 Free Render services sleep when idle; the first request after a pause takes about a minute.
 
 ## How to test (for judges)
 
 1. Open the live URL. The inbox lists this morning's messages. Click a new one, for example the Spanish/English text from **Rosa's Taqueria**.
-2. Watch the "What OrderDesk did" panel: each `search_catalog` call appears as the agent works. The review screen fills with priced lines.
+2. Watch the **Agent activity** timeline: each catalog search and match appears as the agent works. The review screen fills with priced lines. Quantities can be edited in the grid; prices cannot, because they come only from the catalog.
 3. Back in the inbox, open the **Harborview Diner** message "5 cases of cups and some napkins, same as last time" to see flags. Pick a cup size, enter quantities, then **Approve and send invoice**. To enter your own order, use **New order**.
 4. The panel shows `create_invoice`, `send_invoice` and `get_invoice`. Click **Open payer link**.
 5. Log in with the sandbox buyer account given in the Devpost submission and pay.

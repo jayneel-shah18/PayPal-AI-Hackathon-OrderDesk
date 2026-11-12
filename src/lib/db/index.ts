@@ -10,6 +10,26 @@ type Holder = { db?: Promise<Db> };
 // Survive Next.js dev hot reloads: one connection per process.
 const holder = ((globalThis as unknown as { __orderdesk?: Holder }).__orderdesk ??= {});
 
+/**
+ * Apply the SQL files in ./migrations in name order, once each. Runs at startup
+ * and from `npm run db:migrate`, against Neon Postgres or the embedded database alike.
+ */
+export async function runMigrations(db: Db): Promise<string[]> {
+  await db.execute(sql.raw('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())'));
+  const done = await db.execute(sql.raw('SELECT name FROM schema_migrations'));
+  const applied = new Set((done.rows as { name: string }[]).map((r) => r.name));
+  const dir = path.join(process.cwd(), 'migrations');
+  const ran: string[] = [];
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    if (applied.has(file)) continue;
+    const statements = fs.readFileSync(path.join(dir, file), 'utf8').split('--> statement-breakpoint');
+    for (const statement of statements) if (statement.trim()) await db.execute(sql.raw(statement));
+    await db.execute(sql`INSERT INTO schema_migrations (name) VALUES (${file}) ON CONFLICT DO NOTHING`);
+    ran.push(file);
+  }
+  return ran;
+}
+
 async function connect(): Promise<Db> {
   let db: Db;
   const url = process.env.DATABASE_URL?.trim();
@@ -30,7 +50,7 @@ async function connect(): Promise<Db> {
     }
     db = drizzle(client, { schema }) as unknown as Db;
   }
-  for (const statement of schema.DDL) await db.execute(sql.raw(statement));
+  await runMigrations(db);
   await seedCustomers(db);
   return db;
 }

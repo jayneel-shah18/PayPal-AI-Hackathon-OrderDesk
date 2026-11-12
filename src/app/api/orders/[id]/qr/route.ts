@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fail, type RouteCtx } from '@/lib/http';
-import { addEvent, getOrder, HttpError } from '@/lib/orders';
+import { logEvent } from '@/lib/audit';
+import { getOrder, HttpError } from '@/lib/orders';
 import { callPayPalTool, extractQrPng } from '@/lib/paypal';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,7 @@ export async function POST(_req: Request, ctx: RouteCtx) {
     const result = await callPayPalTool('generate_invoice_qr_code', { invoice_id: order.invoiceId, width: 300, height: 300 });
     const png = extractQrPng(result);
     if (!png) throw new HttpError(502, 'PayPal did not return a QR image.');
-    await addEvent(order.id, 'tool_call', 'PayPal · generate_invoice_qr_code', { input: { invoice_id: order.invoiceId } });
+    await logEvent(order.id, 'owner', 'Owner generated a QR code', { invoice_id: order.invoiceId, tool: 'generate_invoice_qr_code' });
     return NextResponse.json({ image: `data:image/png;base64,${png}` });
   } catch (e) {
     return fail(e);

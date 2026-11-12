@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { asc, desc, eq } from 'drizzle-orm';
+import { listEvents, logEvent, type OrderEvent } from './audit';
 import { getDb, schema } from './db';
 import { approvalBlocker, type LineInput, resolveLine, totalCents } from './pricing';
 import type { OrderStatus, ParsedLine, ParsedOrder } from './schema';
 
-const { orders, orderLines, events, customers } = schema;
+const { orders, orderLines, customers } = schema;
 
 export type OrderRow = typeof orders.$inferSelect;
-export type EventRow = typeof events.$inferSelect;
 export type CustomerRow = typeof customers.$inferSelect;
-export type OrderDetail = OrderRow & { lines: ParsedLine[]; events: EventRow[]; blocker: string | null };
+export type OrderDetail = OrderRow & { lines: ParsedLine[]; events: OrderEvent[]; blocker: string | null };
 
 export function newOrderId(): string {
   return `ord_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -68,11 +68,6 @@ export async function createOrder(input: {
     })
     .returning();
   return row;
-}
-
-export async function addEvent(orderId: string, kind: string, label: string, detail?: unknown): Promise<void> {
-  const db = await getDb();
-  await db.insert(events).values({ orderId, kind, label, detail: detail ?? null });
 }
 
 export async function updateOrder(id: string, patch: Partial<typeof orders.$inferInsert>): Promise<void> {
@@ -187,9 +182,35 @@ export async function editOrder(
     update.totalCents = totalCents(lines);
     update.status = statusFor(lines);
     update.error = null;
+    await logLineEdits(id, current.lines, lines, current.totalCents, update.totalCents);
   }
   await updateOrder(id, update);
   return (await getOrder(id))!;
+}
+
+/** Record what the owner changed on the review screen. */
+async function logLineEdits(orderId: string, before: ParsedLine[], after: ParsedLine[], totalBefore: number, totalAfter: number): Promise<void> {
+  const totals = { order_total_before_usd: (totalBefore / 100).toFixed(2), order_total_after_usd: (totalAfter / 100).toFixed(2) };
+  if (after.length < before.length) return logEvent(orderId, 'owner', 'Owner removed a line', { lines_before: before.length, lines_after: after.length, ...totals });
+  if (after.length > before.length) return logEvent(orderId, 'owner', 'Owner added a line', { lines_before: before.length, lines_after: after.length, ...totals });
+  for (let i = 0; i < after.length; i++) {
+    const was = before[i];
+    const now = after[i];
+    if (was.sku !== now.sku) {
+      await logEvent(orderId, 'owner', 'Owner changed product', { line: i + 1, customer_wrote: now.raw_text, from: was.sku, to: now.sku, ...totals });
+    } else if (was.qty !== now.qty) {
+      await logEvent(orderId, 'owner', 'Owner edited quantity', {
+        line: i + 1,
+        product: now.name,
+        from: was.qty,
+        to: now.qty,
+        line_total_usd: now.line_total_cents == null ? null : (now.line_total_cents / 100).toFixed(2),
+        ...totals,
+      });
+    } else if (was.flags.length && !now.flags.length) {
+      await logEvent(orderId, 'owner', 'Owner cleared a flag', { line: i + 1, customer_wrote: now.raw_text });
+    }
+  }
 }
 
 export async function getOrder(id: string): Promise<OrderDetail | null> {
@@ -197,7 +218,7 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   const [order] = await db.select().from(orders).where(eq(orders.id, id));
   if (!order) return null;
   const lineRows = await db.select().from(orderLines).where(eq(orderLines.orderId, id)).orderBy(asc(orderLines.position));
-  const eventRows = await db.select().from(events).where(eq(events.orderId, id)).orderBy(asc(events.id));
+  const eventRows = await listEvents(id);
   const lines = lineRows.map(toParsedLine);
   return {
     ...order,

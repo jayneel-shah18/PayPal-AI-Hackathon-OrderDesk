@@ -15,5 +15,5 @@ export type Meta = {
   samples: { id: string; label: string; tests: string; text: string; image?: string }[];
   customers: { id: string; name: string; email: string }[];
   catalog: { sku: string; name: string; unit: string; packSize: number; priceCents: number; stock: number }[];
-  config: { model: string; claude: boolean; paypal: boolean; webhook: boolean };
+  config: { model: string; claude: boolean; paypal: boolean; webhook: boolean; demoMode: boolean };
 };

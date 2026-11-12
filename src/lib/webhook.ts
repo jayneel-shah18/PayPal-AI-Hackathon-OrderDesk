@@ -1,4 +1,5 @@
-import { addEvent, findOrderByInvoiceId, updateOrder } from './orders';
+import { logEvent } from './audit';
+import { findOrderByInvoiceId, updateOrder } from './orders';
 
 const STATUS_BY_EVENT: Record<string, 'paid' | 'cancelled'> = {
   'INVOICING.INVOICE.PAID': 'paid',
@@ -17,7 +18,8 @@ export async function applyWebhookEvent(event: PayPalEvent): Promise<{ handled: 
   // Redeliveries are normal; a paid order stays paid.
   if (order.status !== status && order.status !== 'paid') {
     await updateOrder(order.id, { status });
-    await addEvent(order.id, 'webhook', `PayPal webhook · ${event.event_type}`, { event_id: event.id, invoice_id: invoiceId });
+    await logEvent(order.id, 'paypal', `Webhook verified: ${event.event_type}`, { event_id: event.id, invoice_id: invoiceId, signature: 'verified with PayPal' });
+    await logEvent(order.id, 'paypal', status === 'paid' ? 'Paid' : 'Invoice cancelled', { invoice_id: invoiceId });
   }
   return { handled: true, orderId: order.id, status };
 }

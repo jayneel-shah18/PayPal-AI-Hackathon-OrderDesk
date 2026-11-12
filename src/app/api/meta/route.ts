@@ -6,6 +6,7 @@ import { fail } from '@/lib/http';
 import { MODEL_ID } from '@/lib/model';
 import { listCustomers } from '@/lib/orders';
 import { paypalConfigured } from '@/lib/paypal';
+import { demoModeEnabled } from '@/lib/seed';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,7 @@ export async function GET() {
         claude: !!process.env.ANTHROPIC_API_KEY,
         paypal: paypalConfigured(),
         webhook: !!process.env.PAYPAL_WEBHOOK_ID,
+        demoMode: demoModeEnabled(),
       },
     });
   } catch (e) {

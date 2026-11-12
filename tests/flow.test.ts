@@ -1,6 +1,7 @@
 import { tool, type ToolSet } from 'ai';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import type { ExtractedOrder } from '@/lib/schema';
 import { scriptedModel } from './helpers';
 
 process.env.ORDERDESK_DB = 'memory';
@@ -9,6 +10,10 @@ delete process.env.DATABASE_URL;
 // Imported after the env is set so the in-memory database is used.
 const { beginApproval, invoiceArgsFor, makeApprovalGuard, runApproval, syncInvoiceStatus } = await import('@/lib/approve');
 const orders = await import('@/lib/orders');
+const audit = await import('@/lib/audit');
+const { GUARDRAIL } = audit;
+
+const actions = (o: { events: { action: string }[] }) => o.events.map((e) => e.action);
 const { parseOrder } = await import('@/lib/parse');
 const { applyWebhookEvent } = await import('@/lib/webhook');
 const { extractQrPng, invoiceIdFrom, orderStatusFor, summarizeInvoice } = await import('@/lib/paypal');
@@ -45,6 +50,7 @@ function fakePayPal() {
 
 async function draftOrder() {
   const order = await orders.createOrder({ rawText: 'Necesito 10 paquetes de servilletas y 4 jugs of dish soap', source: 'text' });
+  let extracted: ExtractedOrder | undefined;
   const parsed = await parseOrder(
     { text: order.rawText },
     {
@@ -62,10 +68,14 @@ async function draftOrder() {
           ],
         }),
       ]),
-      onTool: (e) => orders.addEvent(order.id, 'tool_call', `Catalog · ${e.tool}`, e),
+      onTool: (e) => audit.logEvent(order.id, 'agent', `Searched catalog: "${(e.input as { query: string }).query}"`, { matches: e.output }),
+      onExtracted: (x) => {
+        extracted = x;
+      },
     },
   );
   await orders.saveParsedOrder(order.id, parsed);
+  await audit.logParseResult(order.id, extracted, parsed, 'scripted-model');
   return (await orders.getOrder(order.id))!;
 }
 
@@ -82,7 +92,7 @@ describe('order flow against an in-memory database', () => {
     expect(o.totalCents).toBe(10 * 320 + 4 * 975);
     expect(o.customerId).toBe('cust_rosas');
     expect(o.blocker).toBeNull();
-    expect(o.events.filter((e) => e.kind === 'tool_call')).toHaveLength(2);
+    expect(actions(o).filter((a) => a.startsWith('Searched catalog'))).toHaveLength(2);
   });
 
   it('keeps the known sender and received time when the order names no customer', async () => {
@@ -144,6 +154,90 @@ describe('order flow against an in-memory database', () => {
     expect(paypal.calls).toEqual([]);
     expect(done.status).toBe('failed');
     expect(done.invoiceId).toBeNull();
+    const blocked = done.events.find((e) => e.action === GUARDRAIL.priceNotInCatalog)!;
+    expect(blocked).toMatchObject({ actor: 'agent', detail: { guardrail: true, catalog_price_usd: '3.20', proposed_price_usd: '0.01', tool: 'create_invoice' } });
+  });
+
+  it('guardrail: sending before the owner approves is blocked and logged', async () => {
+    const o = await draftOrder(); // a clean draft the owner has NOT approved
+    const paypal = fakePayPal();
+    await runApproval(o, {
+      model: scriptedModel([[{ tool: 'send_invoice', input: { invoice_id: 'INV2-ANY' } }], [{ tool: 'create_invoice', input: invoiceArgsFor(o) }], 'I was not allowed to send it.']),
+      buildTools: paypal.build,
+      fetchInvoice: sentInvoice,
+    });
+    const after = (await orders.getOrder(o.id))!;
+    expect(paypal.calls).toEqual([]); // nothing reached PayPal
+    expect(after.status).toBe('draft'); // still waiting on the owner
+    expect(after.invoiceId).toBeNull();
+    const blocked = after.events.find((e) => e.action === 'Send invoice blocked: waiting on owner approval')!;
+    expect(blocked).toBeDefined();
+    expect(blocked.actor).toBe('agent');
+    expect(audit.isGuardrail(blocked)).toBe(true);
+    expect(actions(after)).toContain(GUARDRAIL.createBeforeApproval);
+    expect(actions(after)).not.toContain('Owner approved');
+  });
+
+  it('guardrail: a product the AI invents is blocked and logged', async () => {
+    const order = await orders.createOrder({ rawText: '10 chef knives', source: 'text' });
+    const extracted: ExtractedOrder = {
+      customer_name: null,
+      delivery_note: null,
+      lines: [{ raw_text: '10 chef knives', sku: 'HBR-KNIFE-8', quantity: 10, quantity_unit: 'unit', confidence: 0.9, flags: [], flag_reason: null, candidate_skus: [] }],
+    };
+    const { resolveOrder } = await import('@/lib/pricing');
+    const parsed = resolveOrder(extracted);
+    await orders.saveParsedOrder(order.id, parsed);
+    await audit.logParseResult(order.id, extracted, parsed, 'scripted-model');
+    const saved = (await orders.getOrder(order.id))!;
+    expect(saved.lines[0].unit_price_cents).toBeNull();
+    const blocked = saved.events.find((e) => e.action === GUARDRAIL.productNotInCatalog)!;
+    expect(blocked).toMatchObject({ actor: 'agent', detail: { guardrail: true, proposed_sku: 'HBR-KNIFE-8' } });
+    expect(actions(saved).some((a) => a.startsWith('Line flagged for review'))).toBe(true);
+  });
+
+  it('audit trail: every step of a paid order is logged with its actor', async () => {
+    const o = await beginApproval((await draftOrder()).id);
+    const paypal = fakePayPal();
+    await runApproval(o, {
+      model: scriptedModel([[{ tool: 'create_invoice', input: invoiceArgsFor(o) }], [{ tool: 'send_invoice', input: { invoice_id: 'INV2-TEST-0001' } }], 'Done.']),
+      buildTools: paypal.build,
+      fetchInvoice: sentInvoice,
+    });
+    await orders.updateOrder(o.id, { invoiceId: 'INV2-AUDIT' });
+    await applyWebhookEvent({ id: 'WH-AUDIT', event_type: 'INVOICING.INVOICE.PAID', resource: { invoice: { id: 'INV2-AUDIT' } } });
+    const done = (await orders.getOrder(o.id))!;
+    const trail = done.events.map((e) => `${e.actor}: ${e.action}`);
+    expect(trail).toEqual([
+      'agent: Searched catalog: "servilletas"',
+      'agent: Searched catalog: "dish soap"',
+      'agent: Parsed by AI',
+      'agent: Catalog match: 10 × Dispenser napkins (pack of 250)',
+      'agent: Catalog match: 4 × Dish soap 1 gal',
+      'owner: Owner approved',
+      'agent: Invoicing agent started',
+      'agent: Draft invoice created',
+      'agent: Invoice sent via PayPal',
+      'paypal: Invoice 0001 awaiting payment',
+      'paypal: Webhook verified: INVOICING.INVOICE.PAID',
+      'paypal: Paid',
+    ]);
+    expect(done.events.some((e) => audit.isGuardrail(e))).toBe(false);
+  });
+
+  it('editing a quantity recalculates the line and order totals and logs the edit', async () => {
+    const o = await draftOrder(); // 10 napkins at 3.20 + 4 dish soap at 9.75 = 71.00
+    const edited = await orders.editOrder(o.id, {
+      lines: [
+        { raw_text: o.lines[0].raw_text, sku: o.lines[0].sku, qty: 25 },
+        { raw_text: o.lines[1].raw_text, sku: o.lines[1].sku, qty: 4 },
+      ],
+    });
+    expect(edited.lines[0]).toMatchObject({ qty: 25, unit_price_cents: 320, line_total_cents: 8000 });
+    expect(edited.lines[1].line_total_cents).toBe(3900);
+    expect(edited.totalCents).toBe(11900);
+    const event = edited.events.find((e) => e.action === 'Owner edited quantity')!;
+    expect(event).toMatchObject({ actor: 'owner', detail: { line: 1, from: 10, to: 25, line_total_usd: '80.00', order_total_before_usd: '71.00', order_total_after_usd: '119.00' } });
   });
 
   it('webhook marks the order paid, and redelivery is harmless', async () => {

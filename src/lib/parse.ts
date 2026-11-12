@@ -34,6 +34,8 @@ export type ParseOptions = {
   model?: LanguageModel;
   catalog?: CatalogItem[];
   onTool?: (event: ToolEvent) => void | Promise<void>;
+  /** Receives the model's raw proposal, before catalog pricing and validation. */
+  onExtracted?: (extracted: ExtractedOrder) => void | Promise<void>;
 };
 
 /** Model step: messy order in, structured lines out. No prices involved. */
@@ -73,5 +75,6 @@ export async function extractOrder(input: ParseInput, opts: ParseOptions = {}): 
 /** Full parse: model extraction, then catalog pricing and validation in code. */
 export async function parseOrder(input: ParseInput, opts: ParseOptions = {}): Promise<ParsedOrder> {
   const extracted = await extractOrder(input, opts);
+  await opts.onExtracted?.(extracted);
   return resolveOrder(extracted, opts.catalog ?? getCatalog());
 }

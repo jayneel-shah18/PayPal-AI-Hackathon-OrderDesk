@@ -119,3 +119,11 @@ body {
 .ag-grid-scrolling-rows.ag-layout-auto-height {
   min-height: 0 !important;
 }
+
+/* Review screen: flagged order lines, and the pinned total row. */
+.ag-row.od-row-flagged {
+  background-color: var(--color-amber-soft);
+}
+.ag-row.ag-row-pinned {
+  background-color: #faf7f0;
+}
